@@ -35,7 +35,7 @@ int main() {
     int count = 0;
     for (int i = 0; i < num; i++) {
         if (intersects[i]) {
-            std::cout << i + 1 << " ";
+            std::cout << i << " ";
         }
     }
 

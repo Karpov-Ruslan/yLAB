@@ -25,6 +25,14 @@ double vector::mod() const {
     return sqrt(x*x + y*y + z*z);
 }
 
+vector vector::normal() const {
+    vector normal = vect_mp(*this, vector(1.0, 1.0, 1.0));
+    if ( normal != vector(0.0, 0.0, 0.0)) {
+        return normal;
+    }
+    return vect_mp(*this, vector(1.0, -1.0, 1.0));
+}
+
 vector vector::vect_mp(const vector& vector_1, const vector& vector_2) {
     assert(vector_1.is_valid() && vector_2.is_valid());
     return vector(vector_1.y*vector_2.z - vector_1.z*vector_2.y, vector_1.z*vector_2.x - vector_1.x*vector_2.z, vector_1.x*vector_2.y - vector_1.y*vector_2.x);
@@ -74,7 +82,7 @@ bool line::belong(const vector& point) const {
     return (vec_d||(this->point - point));
 }
 
-bool line::intersect_once_on_plane(const line& line_1, const line& line_2) {//PROoooooooooooooooooBLEMMMMMMMMMM
+bool line::intersect_once_on_plane(const line& line_1, const line& line_2) {//perepisat
     return !( line_1||line_2 );
 }
 
@@ -139,7 +147,7 @@ vector line::intersection_point_function(const line& line_1, const line& line_2)
 
 vector line::intersection_point (const line& line_1, const line& line_2) {
     assert(line_1.is_valid() && line_2.is_valid());
-    if (!line::intersect_once_on_plane(line_1, line_2)) {
+    if ( line_1||line_2 ) {
         return vector();
     }
     if (line_1.point == line_2.point) {
@@ -303,8 +311,12 @@ line plane::intersection_line(const plane& plane_1, const plane& plane_2) {
     assert(false);
 }
 
+bool plane::is_valid() const {
+    return (normal != vector(0.0, 0.0, 0.0));
+}
+
 bool operator|| (const plane& plane_1, const plane& plane_2) {
-    return plane_1.normal||plane_2.normal;
+    return ( (plane_1.normal||plane_2.normal) && (plane_1.is_valid() && plane_2.is_valid()) );
 }
 
 bool operator== (const plane& plane_1, const plane& plane_2) {
@@ -316,10 +328,35 @@ bool operator== (const plane& plane_1, const plane& plane_2) {
     return false;
 }
 
+///////////////////////////////////////////////AABB_box//////////////////////////////////////////////////////
+
+bool AABB_box::intersect(const AABB_box& box_1, const AABB_box& box_2) {
+    if (box_1.x_max > box_2.x_min || is_equal(box_1.x_max, box_2.x_min)) {
+        if (box_2.x_max > box_1.x_min || is_equal(box_2.x_max, box_1.x_min)) {
+            if (box_1.y_max > box_2.y_min || is_equal(box_1.y_max, box_2.y_min)) {
+                if (box_2.y_max > box_1.y_min || is_equal(box_2.y_max, box_1.y_min)) {
+                    if (box_1.z_max > box_2.z_min || is_equal(box_1.z_max, box_2.z_min)) {
+                        if (box_2.z_max > box_1.z_min || is_equal(box_2.z_max, box_1.z_min)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 //////////////////////////////////////////////triangles////////////////////////////////////////////////////
 
 plane triangle::get_plane() const {
     return plane(vector::vect_mp(point_3 - point_1, point_2 - point_1), point_1);
+}
+
+AABB_box triangle::get_AABB_box() const {
+    return AABB_box(std::min({point_1.x, point_2.x, point_3.x}), std::max({point_1.x, point_2.x, point_3.x}),
+                    std::min({point_1.y, point_2.y, point_3.y}), std::max({point_1.y, point_2.y, point_3.y}),
+                    std::min({point_1.z, point_2.z, point_3.z}), std::max({point_1.z, point_2.z, point_3.z}));
 }
 
 segment triangle::intersect_on_plane(const line& _line) const {
@@ -355,9 +392,44 @@ segment triangle::intersect_on_plane(const line& _line) const {
     assert(false);
 }
 
-bool triangle::intersect(const triangle& triangle_1, const triangle& triangle_2) {
-    const plane& plane_1 = triangle_1.get_plane();
-    const plane& plane_2 = triangle_2.get_plane();
+plane triangle::plane_getter_for_special_case_intersects() const {
+    if (point_1 != point_2) {
+        return plane((point_2 - point_1).normal(), point_1);
+    }
+    if (point_1 != point_3) {
+        return plane((point_3 - point_1).normal(), point_1);
+    }
+    if (point_2 != point_3) {
+        return plane((point_3 - point_2).normal(), point_2);
+    }
+    return plane(vector(1.0, 1.0, 1.0), point_1);
+}
+
+std::pair<plane, plane> triangle::plane_getter_for_intersect(const triangle& triangle_1, const triangle& triangle_2) {
+    plane plane_1 = triangle_1.get_plane();
+    plane plane_2 = triangle_2.get_plane();
+
+    if (plane_1.is_valid() && plane_2.is_valid()) {
+        return std::pair<plane, plane>(plane_1, plane_2);
+    }
+
+    if ((!(plane_1.is_valid())) && (!(plane_2.is_valid()))) {
+        return std::pair<plane, plane>(triangle_1.plane_getter_for_special_case_intersects(), triangle_2.plane_getter_for_special_case_intersects());
+    }
+
+    if (!(plane_1.is_valid())) {
+        return std::pair<plane, plane>(triangle_1.plane_getter_for_special_case_intersects(), plane_2);
+    }
+
+    //!(plane_2.is_valid())
+    return std::pair<plane, plane>(plane_1, triangle_2.plane_getter_for_special_case_intersects());
+}
+
+bool triangle::intersect_accurate_extra(const triangle& triangle_1, const triangle& triangle_2) {
+    std::pair<plane, plane> planes = plane_getter_for_intersect(triangle_1, triangle_2);
+    const plane& plane_1 = planes.first;
+    const plane& plane_2 = planes.second;
+
     if (plane_1 == plane_2) {
         const vector& point1_1 = triangle_1.point_1, point1_2 = triangle_1.point_2, point1_3 = triangle_1.point_3;
         const vector& point2_1 = triangle_2.point_1, point2_2 = triangle_2.point_2, point2_3 = triangle_2.point_3;
@@ -382,6 +454,13 @@ bool triangle::intersect(const triangle& triangle_1, const triangle& triangle_2)
     line intersection_line = plane::intersection_line(plane_1, plane_2);
 
     return segment::intersection_segment(triangle_1.intersect_on_plane(intersection_line), triangle_2.intersect_on_plane(intersection_line));
+}
+
+bool triangle::intersect(const triangle& triangle_1, const triangle& triangle_2) {
+    if (AABB_box::intersect(triangle_1.get_AABB_box(), triangle_2.get_AABB_box())) {
+        return intersect_accurate_extra(triangle_1, triangle_2);
+    }
+    return false;
 }
 
 
